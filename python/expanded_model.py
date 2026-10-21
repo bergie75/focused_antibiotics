@@ -12,6 +12,25 @@ par_names = ["norm_col_prob", "risk_factors", "dem_prob", "house_size",
             "per_hosp", "hosp_per_yr", "skip_to_H", "pr_pu_risk", "pr_pu_prob", "infection_probs",
             "start_anti_fracs", "start_col_dist", "num_years"]
 
+full_names = {"norm_col_prob": "Normalized prob. of increasing colonization status",
+            "risk_factors": "Relative risk ratio of increasing colonization for antibiotics",
+            "dem_prob": "Prob. of reducing colonization status",
+            "house_size": "Average household size",
+            "house_trans": "Transmission prob. between household members",
+            "food_acq": "Prob. of colonization by food",
+            "animal_acq": "Prob. of colonization by animal contact",
+            "per_travel": "Prob. of colonization per trip out of country",
+            "trips_per_yr": "Average number of trips out of country",
+            "per_hosp": "Prob. of colonization per hospital trip",
+            "hosp_per_yr": "Average number of hospital visits",
+            "skip_to_H": "Prob. to move directly to high colonization",
+            "pr_pu_risk": "Risk ratio of taking proton pump inhibitors",
+            "pr_pu_prob": "Fraction of population taking proton pump inhibitors",
+            "infection_probs": "Prob. of infection for colonization status",
+            "start_anti_fracs": "Initial antibiotic prescription prob.",
+            "start_col_dist": "Initial colonization status proportions",
+            "num_years": "Years in simulation"}
+
 def matrix_t(y,antibiotic_probs, pars):
     # load values from the config file
     # we will assume this is handed in as a vector and let something else do the config unpacking
@@ -61,16 +80,34 @@ def replace_ranges(x, lhs_sample):
     else:
         return y
 
-def run_sens_test(par_yaml, num_samples=1):
-    par_file = os.path.join(os.getcwd(),"focused_antibiotics","parameters",f"{par_yaml}.yaml")
-    with open(par_file, "r", encoding="utf-8") as f:
-            cfg = yaml.safe_load(f)
+def run_sens_test(immutable_pars, run_name=None, num_samples=1000):
+    if run_name is None:
+        datestring=str(dt.now())
+        pieces = datestring.split(" ")
+        subpieces = pieces[1].split(".")
+        run_name = "_".join(pieces[0].split("-"))
     
-    immutable_pars = [cfg[x] for x in par_names]
-    num_ranges = count_ranges(immutable_pars)
+    num_ranges = count_ranges(immutable_pars)  # how many ranges must be replaced by latin hypercube sampling
+    run_infections = np.zeros((num_samples, 1+immutable_pars[-1]))  # final element is number of years in simulation
     lhs_samples = LatinHypercube(d=num_ranges).random(n=num_samples)
     for i in range(0, num_samples):
-        print(replace_ranges(immutable_pars, list(lhs_samples[i])))
+        #print(replace_ranges(immutable_pars, list(lhs_samples[i])))
+        temp_pars = replace_ranges(immutable_pars, list(lhs_samples[i]))
+        sim_output,_ = run_simulation(temp_pars, plot_results=False, save_results=True, sub_folder=run_name)
+        run_infections[i,:] = sim_output[-1,:]
+
+    sens_plotting(run_infections)
+
+def sens_plotting(run_vals):
+    num_runs, num_years = run_vals.shape
+    median_run = np.median(run_vals, axis=0)
+    plt.title("ESBL-E infections")
+    plt.xlabel("Year")
+    plt.ylabel("Proportion of population")
+    for i in range(0, num_runs):
+        plt.plot(range(0,num_years),run_vals[i,:],color="r",alpha=0.2)
+    plt.plot(range(0,num_years),median_run,color="black",marker="*")
+    plt.show()
 
 def plotting_fn(input_val=None, sub_folder=None, filename=None):
     if input_val is not None:
@@ -100,9 +137,18 @@ def plotting_fn(input_val=None, sub_folder=None, filename=None):
     axs[1].set_ylabel("Proportion of population")
     plt.show()
 
-def antibiotic_scenario(start_anti_fracs, num_years, mode="constant"):
+def antibiotic_scenario(start_anti_fracs, num_years, mode="constant", exp_const=0.9):
     if mode == "constant":
         return np.stack((start_anti_fracs,)*num_years)
+    if mode == "linear":
+        pass
+    if mode == "exponential":
+        x = np.zeros((num_years, len(start_anti_fracs)))
+        x[0,:] = start_anti_fracs
+        for i in range(1, num_years):
+            x[i,:] = exp_const*x[i-1,:]
+
+        return x
     else:
         raise ValueError("Invalid mode, scenario not implemented")
 
@@ -115,6 +161,7 @@ def run_simulation(pars, plot_results=True, save_results=False, sub_folder=None,
     infection_probs = np.array(pars[-4])
     x[:3,0] = x0
     x[3:-1,0] = start_anti_fracs
+    x[-1,0] = np.dot(x0, infection_probs)
     for i,antibiotic_probs in enumerate(yearly_antibiotics):
         t=i+1 # deal with the offset between python and counting years
         A_t = matrix_t(x[:,t-1], antibiotic_probs, pars[:-4])  # we leave out the infection probability, matrix builder doesn't need it
@@ -158,5 +205,5 @@ if __name__ == "__main__":
         cfg = yaml.safe_load(f)
     
     pars = [cfg[x] for x in par_names]
-    x,save_loc = run_simulation(pars,sub_folder="huh", save_results=False, plot_results=True)
+    x,save_loc = run_simulation(pars,sub_folder="huh", save_results=False, plot_results=True, mode="exponential")
     #run_sens_test("sens_test", num_samples=10)

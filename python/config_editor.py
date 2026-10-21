@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from pathlib import Path
 import yaml
+from expanded_model import par_names, full_names, run_simulation, run_sens_test
+import os
 
 
 class YamlEditor:
@@ -11,10 +13,22 @@ class YamlEditor:
         self.path = None
         self.data = {}
 
+        self.descriptive_names = full_names
+        self.display_to_key = {}
+
         toolbar = tk.Frame(root)
         toolbar.pack(fill="x", padx=10, pady=10)
 
         tk.Button(toolbar, text="Open YAML", command=self.open_file).pack(side="left")
+
+        self.simulate_button = tk.Button(toolbar, text="Run simulation", command=self.run_sim)
+        self.simulate_button.pack(side="left", padx=(5, 0))
+        self.simulate_button.config(state="disabled")
+
+        # for sensitivity testing
+        self.sens_button = tk.Button(toolbar, text="Run sensitivity analysis", command=self.run_sens)
+        self.sens_button.pack(side="left", padx=(5, 0))
+        self.sens_button.config(state="disabled")
 
         tk.Label(toolbar, text="Variable:").pack(side="left", padx=(15, 5))
 
@@ -50,27 +64,47 @@ class YamlEditor:
         self.path = Path(filename)
         self.data = data
         self.update_dropdown()
+        self.simulate_button.config(state="normal")
+        self.sens_button.config(state="normal")
         self.root.title(f"YAML Variable Editor — {self.path.name}")
 
+    def run_sim(self):
+        with open(self.path, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+            
+        pars = [cfg[x] for x in par_names]
+        run_simulation(pars, save_results=True, plot_results=True)
+
+    def run_sens(self):
+        with open(self.path, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+            
+        immutable_pars = [cfg[x] for x in par_names]
+        run_sens_test(immutable_pars)
+    
     def update_dropdown(self):
         menu = self.dropdown["menu"]
         menu.delete(0, "end")
+        self.display_to_key = {}
 
         keys = list(self.data.keys())
         for key in keys:
+            label = self.descriptive_names.get(str(key), str(key))
+            self.display_to_key[label] = key
             menu.add_command(
-                label=str(key),
-                command=lambda selected=key: self.variable_choice.set(str(selected))
+                label=label,
+                command=lambda selected=label: self.variable_choice.set(selected)
             )
 
         if keys:
-            self.variable_choice.set(str(keys[0]))
+            first_label = self.descriptive_names.get(str(keys[0]), str(keys[0]))
+            self.variable_choice.set(first_label)
         else:
             self.variable_choice.set("")
             self.value_editor.delete("1.0", "end")
 
     def load_variable(self, *_):
-        selected = self.variable_choice.get()
+        selected = self.display_to_key.get(self.variable_choice.get())
         if selected not in self.data:
             return
 
@@ -78,7 +112,7 @@ class YamlEditor:
         self.value_editor.insert("1.0", str(self.data[selected]))
 
     def save_variable(self):
-        selected = self.variable_choice.get()
+        selected = self.display_to_key.get(self.variable_choice.get())
         if not self.path or selected not in self.data:
             messagebox.showerror("Save failed", "Open a YAML file and select a variable.")
             return

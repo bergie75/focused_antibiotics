@@ -1,5 +1,5 @@
 import numpy as np
 from scipy.stats.qmc import LatinHypercube
 
-x=np.array([1,2,3,4,5,6,7,8,9])
-print(x[5:])
+x=np.array([[1,4,7],[2,5,8],[3,6,9]])
+print(np.mean(x, axis=0))
