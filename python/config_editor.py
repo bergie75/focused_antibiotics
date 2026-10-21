@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from pathlib import Path
 import yaml
-from expanded_model import par_names, full_names, run_simulation, run_sens_test
+from expanded_model import par_names, full_names, antibiotic_modes, run_simulation, run_sens_test
 import os
 
 
@@ -12,6 +12,7 @@ class YamlEditor:
         self.root.title("YAML Variable Editor")
         self.path = None
         self.data = {}
+        self.decrease_by = 0
 
         self.descriptive_names = full_names
         self.display_to_key = {}
@@ -20,6 +21,25 @@ class YamlEditor:
         toolbar.pack(fill="x", padx=10, pady=10)
 
         tk.Button(toolbar, text="Open YAML", command=self.open_file).pack(side="left")
+
+        tk.Label(toolbar, text="Variable:").pack(side="left", padx=(15, 5))
+
+        self.variable_choice = tk.StringVar()
+        self.dropdown = tk.OptionMenu(toolbar, self.variable_choice, "")
+        self.dropdown.pack(side="left")
+        self.variable_choice.trace_add("write", self.load_variable)
+
+        tk.Label(toolbar, text="Antibiotic mode:").pack(side="left", padx=(15, 5))
+        self.antibiotic_mode_choice = tk.StringVar(value=antibiotic_modes[0] if antibiotic_modes else "")
+        self.antibiotic_mode_dropdown = tk.OptionMenu(toolbar, self.antibiotic_mode_choice, *antibiotic_modes)
+        self.antibiotic_mode_dropdown.pack(side="left")
+
+        tk.Label(toolbar, text="Decrease by:").pack(side="left", padx=(10, 5))
+        self.input_value = tk.StringVar()
+        self.value_entry = tk.Entry(toolbar, textvariable=self.input_value, width=12)
+        self.value_entry.pack(side="left")
+        self.save_value_button = tk.Button(toolbar, text="Save value", command=self.save_dec_by)
+        self.save_value_button.pack(side="left", padx=(5, 0))
 
         self.simulate_button = tk.Button(toolbar, text="Run simulation", command=self.run_sim)
         self.simulate_button.pack(side="left", padx=(5, 0))
@@ -30,17 +50,10 @@ class YamlEditor:
         self.sens_button.pack(side="left", padx=(5, 0))
         self.sens_button.config(state="disabled")
 
-        tk.Label(toolbar, text="Variable:").pack(side="left", padx=(15, 5))
-
-        self.variable_choice = tk.StringVar()
-        self.dropdown = tk.OptionMenu(toolbar, self.variable_choice, "")
-        self.dropdown.pack(side="left")
-        self.variable_choice.trace_add("write", self.load_variable)
-
         tk.Label(root, text="Value:").pack(anchor="w", padx=10)
-
         self.value_editor = tk.Text(root, height=10, wrap="word")
         self.value_editor.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        value = self.input_value.get()
 
         tk.Button(root, text="Save", command=self.save_variable).pack(
             anchor="e", padx=10, pady=(0, 10)
@@ -69,18 +82,20 @@ class YamlEditor:
         self.root.title(f"YAML Variable Editor — {self.path.name}")
 
     def run_sim(self):
+        mode = self.antibiotic_mode_choice.get()
         with open(self.path, "r", encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
             
         pars = [cfg[x] for x in par_names]
-        run_simulation(pars, save_results=True, plot_results=True)
+        run_simulation(pars, save_results=True, plot_results=True, mode=mode, dec_value=self.decrease_by)
 
     def run_sens(self):
+        mode = self.antibiotic_mode_choice.get()
         with open(self.path, "r", encoding="utf-8") as f:
             cfg = yaml.safe_load(f)
             
         immutable_pars = [cfg[x] for x in par_names]
-        run_sens_test(immutable_pars)
+        run_sens_test(immutable_pars, mode=mode, dec_value=self.decrease_by)
     
     def update_dropdown(self):
         menu = self.dropdown["menu"]
@@ -110,6 +125,9 @@ class YamlEditor:
 
         self.value_editor.delete("1.0", "end")
         self.value_editor.insert("1.0", str(self.data[selected]))
+
+    def save_dec_by(self):
+        self.decrease_by = self.input_value.get()
 
     def save_variable(self):
         selected = self.display_to_key.get(self.variable_choice.get())

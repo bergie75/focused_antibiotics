@@ -7,6 +7,9 @@ from datetime import datetime as dt
 from copy import deepcopy
 
 rng = np.random.default_rng()
+
+antibiotic_modes = ["constant", "exponential"]
+
 par_names = ["norm_col_prob", "risk_factors", "dem_prob", "house_size",
             "house_trans", "food_acq", "animal_acq", "per_travel", "trips_per_yr",
             "per_hosp", "hosp_per_yr", "skip_to_H", "pr_pu_risk", "pr_pu_prob", "infection_probs",
@@ -80,12 +83,12 @@ def replace_ranges(x, lhs_sample):
     else:
         return y
 
-def run_sens_test(immutable_pars, run_name=None, num_samples=1000):
+def run_sens_test(immutable_pars, run_name=None, num_samples=1000, mode="constant", dec_value=0.9):
     if run_name is None:
         datestring=str(dt.now())
         pieces = datestring.split(" ")
         subpieces = pieces[1].split(".")
-        run_name = "_".join(pieces[0].split("-"))
+        run_name = "_".join(pieces[0].split("-"))+"_"+"_".join(subpieces[0].split(":"))+"_"+subpieces[1]
     
     num_ranges = count_ranges(immutable_pars)  # how many ranges must be replaced by latin hypercube sampling
     run_infections = np.zeros((num_samples, 1+immutable_pars[-1]))  # final element is number of years in simulation
@@ -93,7 +96,7 @@ def run_sens_test(immutable_pars, run_name=None, num_samples=1000):
     for i in range(0, num_samples):
         #print(replace_ranges(immutable_pars, list(lhs_samples[i])))
         temp_pars = replace_ranges(immutable_pars, list(lhs_samples[i]))
-        sim_output,_ = run_simulation(temp_pars, plot_results=False, save_results=True, sub_folder=run_name)
+        sim_output,_ = run_simulation(temp_pars, plot_results=False, save_results=True, sub_folder=run_name, mode=mode, dec_value=dec_value)
         run_infections[i,:] = sim_output[-1,:]
 
     sens_plotting(run_infections)
@@ -137,7 +140,7 @@ def plotting_fn(input_val=None, sub_folder=None, filename=None):
     axs[1].set_ylabel("Proportion of population")
     plt.show()
 
-def antibiotic_scenario(start_anti_fracs, num_years, mode="constant", exp_const=0.9):
+def antibiotic_scenario(start_anti_fracs, num_years, mode="constant", dec_value=0.9):
     if mode == "constant":
         return np.stack((start_anti_fracs,)*num_years)
     if mode == "linear":
@@ -146,17 +149,17 @@ def antibiotic_scenario(start_anti_fracs, num_years, mode="constant", exp_const=
         x = np.zeros((num_years, len(start_anti_fracs)))
         x[0,:] = start_anti_fracs
         for i in range(1, num_years):
-            x[i,:] = exp_const*x[i-1,:]
+            x[i,:] = dec_value*x[i-1,:]
 
         return x
     else:
         raise ValueError("Invalid mode, scenario not implemented")
 
-def run_simulation(pars, plot_results=True, save_results=False, sub_folder=None, filename=None, mode="constant"):
+def run_simulation(pars, plot_results=True, save_results=False, sub_folder=None, filename=None, mode="constant", dec_value=0.9):
     x0 = np.array(pars[-2])
     start_anti_fracs = np.array(pars[-3])
     num_years = pars[-1]
-    yearly_antibiotics = antibiotic_scenario(start_anti_fracs, num_years, mode=mode)
+    yearly_antibiotics = antibiotic_scenario(start_anti_fracs, num_years, mode=mode, dec_value=dec_value)
     x = np.zeros((1+len(x0)+len(start_anti_fracs),len(yearly_antibiotics)+1))
     infection_probs = np.array(pars[-4])
     x[:3,0] = x0
