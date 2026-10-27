@@ -8,7 +8,7 @@ from copy import deepcopy
 
 rng = np.random.default_rng()
 
-antibiotic_modes = ["constant", "exponential"]
+antibiotic_modes = ["constant", "exponential", "linear"]
 
 par_names = ["norm_col_prob", "risk_factors", "dem_prob", "house_size",
             "house_trans", "food_acq", "animal_acq", "per_travel", "trips_per_yr",
@@ -40,12 +40,13 @@ def matrix_t(y,antibiotic_probs, pars):
     norm_col_prob, risk_factors, dem_prob, house_size, house_trans, food_acq, animal_acq, per_travel, trips_per_yr, per_hosp, hosp_per_yr, skip_to_H, pr_pu_risk, pr_pu_prob = pars
 
     # calculated values to be used in the transition matrix
-    antibiotic_prob = [1-np.prod(1-x*np.dot(np.array(antibiotic_probs),np.array(risk_factors))) for x in norm_col_prob]
+    antibiotic_prob = [1-np.prod(1-x*np.array(antibiotic_probs)*np.array(risk_factors)) for x in norm_col_prob]
     house_acq = house_trans*(1-y[0]**house_size)  # y = [non-detect, low burden, high burden]
     proton_pump_factor = (1-pr_pu_prob) + pr_pu_prob*pr_pu_risk
     stay_ND = ((1-antibiotic_prob[0])*(1-house_acq)*(1-animal_acq)*(1-food_acq)*(1-per_travel)**trips_per_yr*(1-per_hosp)**hosp_per_yr)/proton_pump_factor
     no_acq_in_L = (1-antibiotic_prob[1])*(1-house_acq)*(1-animal_acq)*(1-food_acq)*(1-per_travel)**trips_per_yr*(1-per_hosp)**hosp_per_yr/proton_pump_factor
     stay_L = (1-dem_prob[0])*no_acq_in_L
+
 
     A_t = np.array([
         [stay_ND,dem_prob[0],0],
@@ -140,11 +141,38 @@ def plotting_fn(input_val=None, sub_folder=None, filename=None):
     axs[1].set_ylabel("Proportion of population")
     plt.show()
 
-def antibiotic_scenario(start_anti_fracs, num_years, mode="constant", dec_value=0.9):
+def compare_two(x,y,scale_factor=1):
+    yearly_antibiotics = x[3:-1,:]
+    _, axs = plt.subplots(1,2)
+    
+    axs[0].plot(range(0,yearly_antibiotics.shape[1]),scale_factor*x[0,:],label="Non-detectable 1", marker="o")
+    axs[0].plot(range(0,yearly_antibiotics.shape[1]),scale_factor*x[1,:],label="Low colonization 1", marker="x")
+    axs[0].plot(range(0,yearly_antibiotics.shape[1]),scale_factor*x[2,:],label="High colonization 1", marker="s")
+    axs[0].plot(range(0,yearly_antibiotics.shape[1]),scale_factor*y[0,:],label="Non-detectable 2", marker="o")
+    axs[0].plot(range(0,yearly_antibiotics.shape[1]),scale_factor*y[1,:],label="Low colonization 2", marker="x")
+    axs[0].plot(range(0,yearly_antibiotics.shape[1]),scale_factor*y[2,:],label="High colonization 2", marker="s")
+    axs[0].set_title("ESBLE-E Colonization")
+    axs[0].set_ylabel("Proportion of population")
+    axs[0].set_xlabel("Year")
+    axs[0].legend()
+
+    axs[1].plot(range(0,yearly_antibiotics.shape[1]),scale_factor*x[-1,:],label="ESBLE-E infections 1", color="r", marker="*")
+    axs[1].plot(range(0,yearly_antibiotics.shape[1]),scale_factor*y[-1,:],label="ESBLE-E infections 2", color="black", marker="*")
+    axs[1].set_title("ESBL-E infections")
+    axs[1].set_xlabel("Year")
+    axs[1].set_ylabel("Proportion of population")
+    plt.show()
+
+def antibiotic_scenario(start_anti_fracs, num_years, mode="constant", dec_value=0.7):
     if mode == "constant":
         return np.stack((start_anti_fracs,)*num_years)
     if mode == "linear":
-        pass
+        x = np.zeros((num_years, len(start_anti_fracs)))
+        x[0,:] = start_anti_fracs
+        for i in range(1, num_years):
+            x[i,:] = np.maximum(x[i-1,:]-dec_value,0)
+        
+        return x
     if mode == "exponential":
         x = np.zeros((num_years, len(start_anti_fracs)))
         x[0,:] = start_anti_fracs
@@ -155,7 +183,7 @@ def antibiotic_scenario(start_anti_fracs, num_years, mode="constant", dec_value=
     else:
         raise ValueError("Invalid mode, scenario not implemented")
 
-def run_simulation(pars, plot_results=True, save_results=False, sub_folder=None, filename=None, mode="constant", dec_value=0.9):
+def run_simulation(pars, plot_results=True, save_results=False, sub_folder=None, filename=None, mode="constant", dec_value=0.7):
     x0 = np.array(pars[-2])
     start_anti_fracs = np.array(pars[-3])
     num_years = pars[-1]
@@ -204,9 +232,15 @@ def run_simulation(pars, plot_results=True, save_results=False, sub_folder=None,
 if __name__ == "__main__":
     # unpack the values in the configuration file
     par_file = os.path.join(os.getcwd(),"focused_antibiotics","parameters","fixed.yaml")
+    par_file = os.path.join(os.getcwd(),"focused_antibiotics","parameters","only_anti.yaml")
     with open(par_file, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     
     pars = [cfg[x] for x in par_names]
-    x,save_loc = run_simulation(pars,sub_folder="huh", save_results=False, plot_results=True, mode="exponential")
+    # matrix_t(cfg["start_col_dist"],np.array([0.06,0.06,0.06,0.06,0.06]),pars[:-4])
+    # matrix_t(cfg["start_col_dist"],np.array([0.0,0.0,0.0,0.0,0.0]),pars[:-4])
+    x,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="constant")
+    y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="linear", dec_value=0.005)
+    #y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="exponential", dec_value=0.7)
+    compare_two(x,y)
     #run_sens_test("sens_test", num_samples=10)

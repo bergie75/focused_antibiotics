@@ -6,10 +6,10 @@ S_0 = 0.77
 C_0 = 0.23
 
 def alpha_calc(f, col_prob, house_prob=0.25):
-    return 1 - (1-col_prob*f)*(1-C_0*house_prob)
+    return 1 - (1-col_prob*f/5)**5*(1-C_0*house_prob)
 
 # [year_1, year_2, ..., year_10]
-col_prob = 0.096
+col_prob = 0.3
 alpha_const = alpha_calc(0.3*np.ones(10), col_prob)
 alpha = [alpha_calc(x, col_prob) for x in np.linspace(0.28, 0.09, 9)]
 alpha.extend([alpha_calc(0.09, col_prob)])

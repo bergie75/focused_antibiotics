@@ -3,7 +3,6 @@ from tkinter import filedialog, messagebox
 from pathlib import Path
 import yaml
 from expanded_model import par_names, full_names, antibiotic_modes, run_simulation, run_sens_test
-import os
 
 
 class YamlEditor:
@@ -127,7 +126,7 @@ class YamlEditor:
         self.value_editor.insert("1.0", str(self.data[selected]))
 
     def save_dec_by(self):
-        self.decrease_by = self.input_value.get()
+        self.decrease_by = float(self.input_value.get())
 
     def save_variable(self):
         selected = self.display_to_key.get(self.variable_choice.get())

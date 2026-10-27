@@ -1,0 +1,38 @@
+norm_col_prob:
+- 0.25-0.95
+- 0.25-0.95
+risk_factors:
+- 0.9
+- 0.875
+- 0.625
+- 0.425
+- 0.15
+start_anti_fracs:
+- 0-0.06
+- 0-0.06
+- 0-0.06
+- 0-0.06
+- 0-0.06
+dem_prob:
+- 0.65
+- 0.65
+start_col_dist:
+- 0.9
+- 0.08
+- 0.02
+infection_probs:
+- 0.0012
+- 0.06
+- 0.12
+pr_pu_risk: 1.48
+pr_pu_prob: 0.3
+skip_to_H: 0.1
+house_size: 4
+house_trans: 0.7
+food_acq: 0.01
+animal_acq: 0.01
+per_travel: 0.35
+trips_per_yr: 1
+per_hosp: 0.03
+hosp_per_yr: 1
+num_years: 10
