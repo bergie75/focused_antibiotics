@@ -34,13 +34,13 @@ full_names = {"norm_col_prob": "Normalized prob. of increasing colonization stat
             "start_col_dist": "Initial colonization status proportions",
             "num_years": "Years in simulation"}
 
-def matrix_t(y,antibiotic_probs, pars):
+def matrix_t(y,antibiotic_probs, pars, print_mat=False):
     # load values from the config file
     # we will assume this is handed in as a vector and let something else do the config unpacking
     norm_col_prob, risk_factors, dem_prob, house_size, house_trans, food_acq, animal_acq, per_travel, trips_per_yr, per_hosp, hosp_per_yr, skip_to_H, pr_pu_risk, pr_pu_prob = pars
 
     # calculated values to be used in the transition matrix
-    antibiotic_prob = [1-np.prod(1-x*np.array(antibiotic_probs)*np.array(risk_factors)) for x in norm_col_prob]
+    antibiotic_prob = [1-np.prod(1-norm_col_prob[i]*np.array(antibiotic_probs)*np.array(risk_factors[i])) for i in range(0,2)]
     house_acq = house_trans*(1-y[0]**house_size)  # y = [non-detect, low burden, high burden]
     proton_pump_factor = (1-pr_pu_prob) + pr_pu_prob*pr_pu_risk
     stay_ND = ((1-antibiotic_prob[0])*(1-house_acq)*(1-animal_acq)*(1-food_acq)*(1-per_travel)**trips_per_yr*(1-per_hosp)**hosp_per_yr)/proton_pump_factor
@@ -54,6 +54,8 @@ def matrix_t(y,antibiotic_probs, pars):
         [skip_to_H*(1-stay_ND),(1-no_acq_in_L)*(1-dem_prob[0]),1-dem_prob[1]]
     ])
 
+    if print_mat:
+        print(A_t)
     return A_t
 
 def count_ranges(x):
@@ -183,7 +185,7 @@ def antibiotic_scenario(start_anti_fracs, num_years, mode="constant", dec_value=
     else:
         raise ValueError("Invalid mode, scenario not implemented")
 
-def run_simulation(pars, plot_results=True, save_results=False, sub_folder=None, filename=None, mode="constant", dec_value=0.7):
+def run_simulation(pars, plot_results=True, save_results=False, sub_folder=None, filename=None, mode="constant", dec_value=0.7, print_mat=False):
     x0 = np.array(pars[-2])
     start_anti_fracs = np.array(pars[-3])
     num_years = pars[-1]
@@ -195,7 +197,7 @@ def run_simulation(pars, plot_results=True, save_results=False, sub_folder=None,
     x[-1,0] = np.dot(x0, infection_probs)
     for i,antibiotic_probs in enumerate(yearly_antibiotics):
         t=i+1 # deal with the offset between python and counting years
-        A_t = matrix_t(x[:,t-1], antibiotic_probs, pars[:-4])  # we leave out the infection probability, matrix builder doesn't need it
+        A_t = matrix_t(x[:,t-1], antibiotic_probs, pars[:-4], print_mat=print_mat)  # we leave out the infection probability, matrix builder doesn't need it
         x[:3,t] = np.matmul(A_t,x[:3,t-1])
         x[3:-1,t] = antibiotic_probs
         x[-1:,t] = np.dot(x[:3,t], infection_probs) 
@@ -231,7 +233,7 @@ def run_simulation(pars, plot_results=True, save_results=False, sub_folder=None,
 
 if __name__ == "__main__":
     # unpack the values in the configuration file
-    par_file = os.path.join(os.getcwd(),"focused_antibiotics","parameters","fixed.yaml")
+    #par_file = os.path.join(os.getcwd(),"focused_antibiotics","parameters","fixed.yaml")
     par_file = os.path.join(os.getcwd(),"focused_antibiotics","parameters","only_anti.yaml")
     with open(par_file, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
@@ -239,7 +241,7 @@ if __name__ == "__main__":
     pars = [cfg[x] for x in par_names]
     # matrix_t(cfg["start_col_dist"],np.array([0.06,0.06,0.06,0.06,0.06]),pars[:-4])
     # matrix_t(cfg["start_col_dist"],np.array([0.0,0.0,0.0,0.0,0.0]),pars[:-4])
-    x,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="constant")
+    x,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="constant", print_mat=True)
     y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="linear", dec_value=0.005)
     #y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="exponential", dec_value=0.7)
     compare_two(x,y)
