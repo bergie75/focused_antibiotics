@@ -1,0 +1,252 @@
+import numpy as np
+from scipy.stats.qmc import LatinHypercube
+import yaml
+import os
+import matplotlib.pyplot as plt
+from datetime import datetime as dt
+from copy import deepcopy
+
+rng = np.random.default_rng()
+
+antibiotic_modes = ["constant", "exponential", "linear", "zero_out"]
+
+par_names = ["norm_col_prob", "risk_factors", "dem_prob", "house_lmbda",
+            "house_trans", "food_acq", "animal_acq", "per_travel", "trips_lmbda",
+            "per_hosp", "hosp_lmbda", "pr_pu_risk", "pr_pu_prob", "infection_probs",
+            "start_anti_fracs", "start_col_dist", "num_years"]
+
+full_names = {"norm_col_prob": "Normalized prob. of increasing colonization status",
+            "risk_factors": "Relative risk ratio of increasing colonization for antibiotics",
+            "dem_prob": "Prob. of reducing colonization status",
+            "house_lmbda": "Parameter for exponential distribution for house size",
+            "house_trans": "Transmission prob. between household members",
+            "food_acq": "Prob. of colonization by food",
+            "animal_acq": "Prob. of colonization by animal contact",
+            "per_travel": "Prob. of colonization per trip out of country",
+            "trips_lmbda": "Parameter for exponential distribution for trips taken",
+            "per_hosp": "Prob. of colonization per hospital trip",
+            "hosp_lmbda": "Parameter for exponential distribution for hospital visits",
+            "pr_pu_risk": "Risk ratio of taking proton pump inhibitors",
+            "pr_pu_prob": "Fraction of population taking proton pump inhibitors",
+            "infection_probs": "Prob. of infection for colonization status",
+            "start_anti_fracs": "Initial antibiotic prescription prob.",
+            "start_col_dist": "Initial colonization status proportions",
+            "num_years": "Years in simulation"}
+
+def exp_mgf_help(t, lmbda):
+    return lmbda/(lmbda-t)
+
+def poiss_mgf(t, lmbda):
+    return np.exp(lmbda*(np.exp(t)-1))
+
+def matrix_t(y,antibiotic_probs, pars, print_mat=False):
+    # load values from the config file
+    # we will assume this is handed in as a vector and let something else do the config unpacking
+    norm_col_prob, risk_factors, dem_prob, house_lmbda, house_trans, food_acq, animal_acq, per_travel, trips_lmbda, per_hosp, hosp_lmbda, pr_pu_risk, pr_pu_prob = pars
+
+    # calculated values to be used in the transition matrix
+    antibiotic_prob = 1-np.prod(1-norm_col_prob*np.array(antibiotic_probs)*np.array(risk_factors))
+    house_acq = house_trans*(1-poiss_mgf(np.log(y[0]), house_lmbda))  # y = [non-detect, low burden, high burden]
+    proton_pump_factor = (1-pr_pu_prob) + pr_pu_prob*pr_pu_risk
+    stay_ND = ((1-antibiotic_prob)*(1-house_acq)*(1-animal_acq)*(1-food_acq)*poiss_mgf(np.log((1-per_travel)),trips_lmbda)*poiss_mgf(np.log((1-per_hosp)),hosp_lmbda))/proton_pump_factor
+    #no_acq_in_L = (1-antibiotic_prob[1])*(1-house_acq)*(1-animal_acq)*(1-food_acq)*poiss_mgf(np.log((1-per_travel)),trips_lmbda)*poiss_mgf(np.log((1-per_hosp)),hosp_lmbda)/proton_pump_factor
+    #stay_L = (1-dem_prob[0])*no_acq_in_L
+
+    A_t = np.array([
+        [stay_ND,dem_prob],
+        [(1-stay_ND),1-dem_prob]])
+
+    if print_mat:
+        print(A_t)
+    return A_t
+
+def count_ranges(x):
+    num_ranges = 0
+    y=deepcopy(x)
+    if type(y) is list:
+        for elem in y:
+            num_ranges += count_ranges(elem)
+    elif type(y) is str:
+        # the element is of the form a-b, choose randomly from this interval
+        num_ranges += 1
+    
+    return num_ranges
+
+def replace_ranges(x, lhs_sample):
+    y=deepcopy(x)
+    if type(y) is list:
+        for i,elem in enumerate(y):
+            y[i] = replace_ranges(elem, lhs_sample)
+        return y
+    elif type(y) is str:
+        # the element is of the form a-b, choose randomly from this interval
+        r=float(lhs_sample.pop(0))
+        a,b = y.split("-")
+        a=float(a)
+        b=float(b)
+        return a+(b-a)*r
+    else:
+        return y
+
+def run_sens_test(immutable_pars, run_name=None, num_samples=1000, mode="constant", dec_value=0.9):
+    if run_name is None:
+        datestring=str(dt.now())
+        pieces = datestring.split(" ")
+        subpieces = pieces[1].split(".")
+        run_name = "_".join(pieces[0].split("-"))+"_"+"_".join(subpieces[0].split(":"))+"_"+subpieces[1]
+    
+    num_ranges = count_ranges(immutable_pars)  # how many ranges must be replaced by latin hypercube sampling
+    run_infections = np.zeros((num_samples, 1+immutable_pars[-1]))  # final element is number of years in simulation
+    lhs_samples = LatinHypercube(d=num_ranges).random(n=num_samples)
+    for i in range(0, num_samples):
+        #print(replace_ranges(immutable_pars, list(lhs_samples[i])))
+        temp_pars = replace_ranges(immutable_pars, list(lhs_samples[i]))
+        sim_output,_ = run_simulation(temp_pars, plot_results=False, save_results=True, sub_folder=run_name, mode=mode, dec_value=dec_value)
+        run_infections[i,:] = sim_output[-1,:]
+
+    sens_plotting(run_infections)
+
+def sens_plotting(run_vals):
+    num_runs, num_years = run_vals.shape
+    median_run = np.median(run_vals, axis=0)
+    plt.title("ESBL-E infections")
+    plt.xlabel("Year")
+    plt.ylabel("Proportion of population")
+    for i in range(0, num_runs):
+        plt.plot(range(0,num_years),run_vals[i,:],color="r",alpha=0.2)
+    plt.plot(range(0,num_years),median_run,color="black",marker="*")
+    plt.show()
+
+def plotting_fn(input_val=None, sub_folder=None, filename=None):
+    if input_val is not None:
+        x=input_val
+    elif filename is not None:
+        cwd=os.getcwd()
+        save_loc = os.path.join(cwd, "focused_antibiotics", "output")
+        if sub_folder is not None:
+            save_loc = os.path.join(save_loc, sub_folder)
+        save_loc = os.path.join(save_loc, f"{filename}.npy")
+        x = np.load(save_loc)
+
+    yearly_antibiotics = x[3:-1,:]
+    _, axs = plt.subplots(1,2)
+    
+    axs[0].plot(range(0,yearly_antibiotics.shape[1]),x[0,:],label="Non-detectable", marker="o")
+    axs[0].plot(range(0,yearly_antibiotics.shape[1]),x[1,:],label="Colonized", marker="x")
+    #axs[0].plot(range(0,yearly_antibiotics.shape[1]),x[2,:],label="High colonization", marker="s")
+    axs[0].set_title("ESBLE-E Colonization")
+    axs[0].set_ylabel("Proportion of population")
+    axs[0].set_xlabel("Year")
+    axs[0].legend()
+
+    axs[1].plot(range(0,yearly_antibiotics.shape[1]),x[-1,:],label="ESBLE-E infections", color="r", marker="*")
+    axs[1].set_title("ESBL-E infections")
+    axs[1].set_xlabel("Year")
+    axs[1].set_ylabel("Proportion of population")
+    plt.show()
+
+def compare_two(x,y,scale_factor=1):
+    yearly_antibiotics = x[3:-1,:]
+    _, axs = plt.subplots(1,2)
+    
+    axs[0].plot(range(0,yearly_antibiotics.shape[1]),scale_factor*x[0,:],label="Non-detectable 1", marker="o")
+    axs[0].plot(range(0,yearly_antibiotics.shape[1]),scale_factor*x[1,:],label="Colonization 1", marker="x")
+    #axs[0].plot(range(0,yearly_antibiotics.shape[1]),scale_factor*x[2,:],label="High colonization 1", marker="s")
+    axs[0].plot(range(0,yearly_antibiotics.shape[1]),scale_factor*y[0,:],label="Non-detectable 2", marker="o")
+    axs[0].plot(range(0,yearly_antibiotics.shape[1]),scale_factor*y[1,:],label="Colonization 2", marker="x")
+    #axs[0].plot(range(0,yearly_antibiotics.shape[1]),scale_factor*y[2,:],label="High colonization 2", marker="s")
+    axs[0].set_title("ESBLE-E Colonization")
+    axs[0].set_ylabel("Proportion of population")
+    axs[0].set_xlabel("Year")
+    axs[0].legend()
+
+    axs[1].plot(range(0,yearly_antibiotics.shape[1]),scale_factor*x[-1,:],label="ESBLE-E infections 1", color="r", marker="*")
+    axs[1].plot(range(0,yearly_antibiotics.shape[1]),scale_factor*y[-1,:],label="ESBLE-E infections 2", color="black", marker="*")
+    axs[1].set_title("ESBL-E infections")
+    axs[1].set_xlabel("Year")
+    axs[1].set_ylabel("Proportion of population")
+    plt.show()
+
+def antibiotic_scenario(start_anti_fracs, num_years, mode="constant", dec_value=0.7):
+    if mode == "zero_out":
+        return np.zeros((num_years, len(start_anti_fracs)))
+    if mode == "constant":
+        return np.stack((start_anti_fracs,)*num_years)
+    if mode == "linear":
+        x = np.zeros((num_years, len(start_anti_fracs)))
+        x[0,:] = start_anti_fracs
+        for i in range(1, num_years):
+            x[i,:] = np.maximum(x[i-1,:]-dec_value,0)
+        
+        return x
+    if mode == "exponential":
+        x = np.zeros((num_years, len(start_anti_fracs)))
+        x[0,:] = start_anti_fracs
+        for i in range(1, num_years):
+            x[i,:] = dec_value*x[i-1,:]
+
+        return x
+    else:
+        raise ValueError("Invalid mode, scenario not implemented")
+
+def run_simulation(pars, plot_results=True, save_results=False, sub_folder=None, filename=None, mode="constant", dec_value=0.7, print_mat=False):
+    x0 = np.array(pars[-2])
+    start_anti_fracs = np.array(pars[-3])
+    num_years = pars[-1]
+    yearly_antibiotics = antibiotic_scenario(start_anti_fracs, num_years, mode=mode, dec_value=dec_value)
+    x = np.zeros((1+len(x0)+len(start_anti_fracs),len(yearly_antibiotics)+1))
+    infection_probs = np.array(pars[-4])
+    x[:2,0] = x0
+    x[2:-1,0] = start_anti_fracs
+    x[-1,0] = np.dot(x0, infection_probs)
+    for i,antibiotic_probs in enumerate(yearly_antibiotics):
+        t=i+1 # deal with the offset between python and counting years
+        A_t = matrix_t(x[:,t-1], antibiotic_probs, pars[:-4], print_mat=print_mat)  # we leave out the infection probability, matrix builder doesn't need it
+        x[:2,t] = np.matmul(A_t,x[:2,t-1])
+        x[2:-1,t] = antibiotic_probs
+        x[-1:,t] = np.dot(x[:2,t], infection_probs) 
+
+    if plot_results:
+        # plt.plot(range(0,len(yearly_antibiotics)+1),x[0,:],label="ND")
+        # plt.plot(range(0,len(yearly_antibiotics)+1),x[1,:],label="L")
+        # plt.plot(range(0,len(yearly_antibiotics)+1),x[2,:],label="H")
+        # plt.legend()
+        # plt.show()
+        plotting_fn(input_val=x)
+
+    if save_results:
+        cwd = os.getcwd()
+        save_loc = os.path.join(cwd, "focused_antibiotics", "output")
+        
+        # useful functionality for sensitivity analysis
+        if sub_folder is not None:
+            save_loc = os.path.join(save_loc, sub_folder)
+            if not os.path.exists(save_loc):
+                os.mkdir(save_loc)
+        
+        if filename is None:
+            datestring=str(dt.now())
+            pieces = datestring.split(" ")
+            subpieces = pieces[1].split(".")
+            filename = "_".join(pieces[0].split("-"))+"_"+"_".join(subpieces[0].split(":"))+"_"+subpieces[1]
+        
+        save_loc = os.path.join(save_loc, filename)
+        np.save(save_loc, x)
+    
+    return x, filename
+
+if __name__ == "__main__":
+    # unpack the values in the configuration file
+    par_file = os.path.join(os.getcwd(),"focused_antibiotics","parameters","2_state.yaml")
+    with open(par_file, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    
+    pars = [cfg[x] for x in par_names]
+    # matrix_t(cfg["start_col_dist"],np.array([0.06,0.06,0.06,0.06,0.06]),pars[:-4])
+    # matrix_t(cfg["start_col_dist"],np.array([0.0,0.0,0.0,0.0,0.0]),pars[:-4])
+    x,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="constant", print_mat=True)
+    #y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="linear", dec_value=0.005)
+    #y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="exponential", dec_value=0.85)
+    y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="zero_out")
+    compare_two(x,y)
+    #run_sens_test("sens_test", num_samples=10)
