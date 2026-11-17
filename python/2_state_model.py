@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.stats.qmc import LatinHypercube
+from scipy.optimize import fsolve
 import yaml
 import os
 import matplotlib.pyplot as plt
@@ -10,12 +11,13 @@ rng = np.random.default_rng()
 
 antibiotic_modes = ["constant", "exponential", "linear", "zero_out"]
 
-par_names = ["norm_col_prob", "risk_factors", "dem_prob", "house_lmbda",
+par_names = ["col_to_inf_risk", "norm_col_prob", "risk_factors", "dem_prob", "house_lmbda",
             "house_trans", "food_acq", "animal_acq", "per_travel", "trips_lmbda",
             "per_hosp", "hosp_lmbda", "pr_pu_risk", "pr_pu_prob", "infection_probs",
             "start_anti_fracs", "start_col_dist", "num_years"]
 
-full_names = {"norm_col_prob": "Normalized prob. of increasing colonization status",
+full_names = {"col_to_inf_risk": "Risk ratio of developing infection while colonized and on antibiotics",
+            "norm_col_prob": "Normalized prob. of increasing colonization status",
             "risk_factors": "Relative risk ratio of increasing colonization for antibiotics",
             "dem_prob": "Prob. of reducing colonization status",
             "house_lmbda": "Parameter for exponential distribution for house size",
@@ -39,18 +41,20 @@ def exp_mgf_help(t, lmbda):
 def poiss_mgf(t, lmbda):
     return np.exp(lmbda*(np.exp(t)-1))
 
+def poiss_mgf_simplify(s,lmbda):
+    return np.exp(-s*lmbda)
+
 def matrix_t(y,antibiotic_probs, pars, print_mat=False):
     # load values from the config file
     # we will assume this is handed in as a vector and let something else do the config unpacking
-    norm_col_prob, risk_factors, dem_prob, house_lmbda, house_trans, food_acq, animal_acq, per_travel, trips_lmbda, per_hosp, hosp_lmbda, pr_pu_risk, pr_pu_prob = pars
+    _, norm_col_prob, risk_factors, dem_prob, house_lmbda, house_trans, food_acq, animal_acq, per_travel, trips_lmbda, per_hosp, hosp_lmbda, pr_pu_risk, pr_pu_prob = pars
 
     # calculated values to be used in the transition matrix
     antibiotic_prob = 1-np.prod(1-norm_col_prob*np.array(antibiotic_probs)*np.array(risk_factors))
-    house_acq = house_trans*(1-poiss_mgf(np.log(y[0]), house_lmbda))  # y = [non-detect, low burden, high burden]
+    travel_prob = 1-np.prod(np.array([poiss_mgf(np.log(1-per_travel[i]), trips_lmbda[i]) for i in range(0, len(per_travel))]))
+    house_acq = house_trans*(1-poiss_mgf(np.log(y[0]), house_lmbda))
     proton_pump_factor = (1-pr_pu_prob) + pr_pu_prob*pr_pu_risk
-    stay_ND = ((1-antibiotic_prob)*(1-house_acq)*(1-animal_acq)*(1-food_acq)*poiss_mgf(np.log((1-per_travel)),trips_lmbda)*poiss_mgf(np.log((1-per_hosp)),hosp_lmbda))/proton_pump_factor
-    #no_acq_in_L = (1-antibiotic_prob[1])*(1-house_acq)*(1-animal_acq)*(1-food_acq)*poiss_mgf(np.log((1-per_travel)),trips_lmbda)*poiss_mgf(np.log((1-per_hosp)),hosp_lmbda)/proton_pump_factor
-    #stay_L = (1-dem_prob[0])*no_acq_in_L
+    stay_ND = ((1-antibiotic_prob)*(1-house_acq)*(1-animal_acq)*(1-food_acq)*(1-travel_prob)*poiss_mgf(np.log((1-per_hosp)),hosp_lmbda))/proton_pump_factor
 
     A_t = np.array([
         [stay_ND,dem_prob],
@@ -59,6 +63,15 @@ def matrix_t(y,antibiotic_probs, pars, print_mat=False):
     if print_mat:
         print(A_t)
     return A_t
+
+def par_equilibrium(y0, antibiotic_probs, pars):
+    _, norm_col_prob, risk_factors, dem_prob, house_lmbda, house_trans, food_acq, animal_acq, per_travel, trips_lmbda, per_hosp, hosp_lmbda, pr_pu_risk, pr_pu_prob = pars
+    antibiotic_prob = 1-np.prod(1-norm_col_prob*np.array(antibiotic_probs)*np.array(risk_factors))
+    travel_prob = 1-np.prod(np.array([poiss_mgf(np.log(1-per_travel[i]), trips_lmbda[i]) for i in range(0, len(per_travel))]))
+    proton_pump_factor = (1-pr_pu_prob) + pr_pu_prob*pr_pu_risk
+    nd_pref = ((1-antibiotic_prob)*(1-animal_acq)*(1-food_acq)*(1-travel_prob)*poiss_mgf(np.log((1-per_hosp)),hosp_lmbda))/proton_pump_factor
+    eqn_rhs = lambda y: y*(1+dem_prob-nd_pref*(1-house_trans+house_trans*np.exp(-house_lmbda*(1-y)))) - dem_prob
+    return fsolve(eqn_rhs, y0)
 
 def count_ranges(x):
     num_ranges = 0
@@ -88,7 +101,7 @@ def replace_ranges(x, lhs_sample):
     else:
         return y
 
-def run_sens_test(immutable_pars, run_name=None, num_samples=1000, mode="constant", dec_value=0.9):
+def run_sens_test(immutable_pars, run_name=None, num_samples=1000, mode="constant", dec_value=0.9, floor_frac=0.0, show_col=True):
     if run_name is None:
         datestring=str(dt.now())
         pieces = datestring.split(" ")
@@ -97,19 +110,28 @@ def run_sens_test(immutable_pars, run_name=None, num_samples=1000, mode="constan
     
     num_ranges = count_ranges(immutable_pars)  # how many ranges must be replaced by latin hypercube sampling
     run_infections = np.zeros((num_samples, 1+immutable_pars[-1]))  # final element is number of years in simulation
+    run_colonizations = np.zeros((num_samples, 1+immutable_pars[-1]))  # final element is number of years in simulation
     lhs_samples = LatinHypercube(d=num_ranges).random(n=num_samples)
+    sample_outputs = []
     for i in range(0, num_samples):
-        #print(replace_ranges(immutable_pars, list(lhs_samples[i])))
         temp_pars = replace_ranges(immutable_pars, list(lhs_samples[i]))
-        sim_output,_ = run_simulation(temp_pars, plot_results=False, save_results=True, sub_folder=run_name, mode=mode, dec_value=dec_value)
+        sim_output,_ = run_simulation(temp_pars, plot_results=False, save_results=True, sub_folder=run_name, mode=mode, dec_value=dec_value, floor_frac=floor_frac)
         run_infections[i,:] = sim_output[-1,:]
+        run_colonizations[i,:] = sim_output[1,:]
+        sample_outputs.append(temp_pars)
 
-    sens_plotting(run_infections)
+    if show_col:
+        sens_plotting(run_colonizations, show_col)
+    else:
+        sens_plotting(run_infections, show_col)
 
-def sens_plotting(run_vals):
+def sens_plotting(run_vals, show_col):
     num_runs, num_years = run_vals.shape
     median_run = np.median(run_vals, axis=0)
-    plt.title("ESBL-E infections")
+    if show_col:
+        plt.title("ESBL-E colonizations")
+    else:
+        plt.title("ESBL-E infections")
     plt.xlabel("Year")
     plt.ylabel("Proportion of population")
     for i in range(0, num_runs):
@@ -167,7 +189,7 @@ def compare_two(x,y,scale_factor=1):
     axs[1].set_ylabel("Proportion of population")
     plt.show()
 
-def antibiotic_scenario(start_anti_fracs, num_years, mode="constant", dec_value=0.7):
+def antibiotic_scenario(start_anti_fracs, num_years, mode="constant", dec_value=0.7, floor_frac=0):
     if mode == "zero_out":
         return np.zeros((num_years, len(start_anti_fracs)))
     if mode == "constant":
@@ -176,42 +198,43 @@ def antibiotic_scenario(start_anti_fracs, num_years, mode="constant", dec_value=
         x = np.zeros((num_years, len(start_anti_fracs)))
         x[0,:] = start_anti_fracs
         for i in range(1, num_years):
-            x[i,:] = np.maximum(x[i-1,:]-dec_value,0)
-        
+            x[i,:] = np.maximum(x[i-1,:]-dec_value,floor_frac*start_anti_fracs)
         return x
     if mode == "exponential":
         x = np.zeros((num_years, len(start_anti_fracs)))
         x[0,:] = start_anti_fracs
         for i in range(1, num_years):
             x[i,:] = dec_value*x[i-1,:]
-
         return x
     else:
         raise ValueError("Invalid mode, scenario not implemented")
 
-def run_simulation(pars, plot_results=True, save_results=False, sub_folder=None, filename=None, mode="constant", dec_value=0.7, print_mat=False):
+def infections(x, antibiotic_probs, risk_factors, infection_probs, col_to_inf_risk):
+    antibiotic_prob = 1-np.prod(1-np.array(antibiotic_probs)*np.array(risk_factors))
+    mod_inf_probs = infection_probs*np.array([1,(1-antibiotic_prob)+col_to_inf_risk*antibiotic_prob])  # exposure to antibiotics doubles risk factor
+    return np.dot(x, mod_inf_probs)
+
+def run_simulation(pars, plot_results=True, save_results=False, sub_folder=None, filename=None, mode="constant", dec_value=0.7, floor_frac=0.0, print_mat=False):
     x0 = np.array(pars[-2])
     start_anti_fracs = np.array(pars[-3])
     num_years = pars[-1]
-    yearly_antibiotics = antibiotic_scenario(start_anti_fracs, num_years, mode=mode, dec_value=dec_value)
+    col_to_inf_risk = pars[0]
+    #norm_col_prob = pars[1]
+    risk_factors = pars[2]
+    yearly_antibiotics = antibiotic_scenario(start_anti_fracs, num_years, mode=mode, dec_value=dec_value, floor_frac=floor_frac)
     x = np.zeros((1+len(x0)+len(start_anti_fracs),len(yearly_antibiotics)+1))
     infection_probs = np.array(pars[-4])
     x[:2,0] = x0
     x[2:-1,0] = start_anti_fracs
-    x[-1,0] = np.dot(x0, infection_probs)
+    x[-1,0] = infections(x0, start_anti_fracs, risk_factors, infection_probs, col_to_inf_risk)  #np.dot(x0, infection_probs)
     for i,antibiotic_probs in enumerate(yearly_antibiotics):
         t=i+1 # deal with the offset between python and counting years
         A_t = matrix_t(x[:,t-1], antibiotic_probs, pars[:-4], print_mat=print_mat)  # we leave out the infection probability, matrix builder doesn't need it
         x[:2,t] = np.matmul(A_t,x[:2,t-1])
         x[2:-1,t] = antibiotic_probs
-        x[-1:,t] = np.dot(x[:2,t], infection_probs) 
+        x[-1:,t] = infections(x[:2,t], antibiotic_probs, risk_factors, infection_probs, col_to_inf_risk)  #np.dot(x[:2,t], infection_probs) 
 
     if plot_results:
-        # plt.plot(range(0,len(yearly_antibiotics)+1),x[0,:],label="ND")
-        # plt.plot(range(0,len(yearly_antibiotics)+1),x[1,:],label="L")
-        # plt.plot(range(0,len(yearly_antibiotics)+1),x[2,:],label="H")
-        # plt.legend()
-        # plt.show()
         plotting_fn(input_val=x)
 
     if save_results:
@@ -242,11 +265,19 @@ if __name__ == "__main__":
         cfg = yaml.safe_load(f)
     
     pars = [cfg[x] for x in par_names]
-    # matrix_t(cfg["start_col_dist"],np.array([0.06,0.06,0.06,0.06,0.06]),pars[:-4])
-    # matrix_t(cfg["start_col_dist"],np.array([0.0,0.0,0.0,0.0,0.0]),pars[:-4])
-    x,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="constant", print_mat=True)
-    #y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="linear", dec_value=0.005)
+    prop_y0 = cfg["start_col_dist"][0]
+    prop_eq = par_equilibrium(prop_y0, np.array(pars[-3]), pars[:-4])
+    
+    print(f"Estimated equilibrium: [{prop_eq[0]},{1-prop_eq[0]}]")
+    #y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="zero_out")
     #y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="exponential", dec_value=0.85)
-    y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="zero_out")
+    x,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="constant")
+    y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="linear", dec_value=0.005, floor_frac=0.5)
     compare_two(x,y)
-    #run_sens_test("sens_test", num_samples=10)
+
+    sens_par_file = os.path.join(os.getcwd(),"focused_antibiotics","parameters","2_state_sensitivity.yaml")
+    with open(sens_par_file, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    
+    immutable_pars = [cfg[x] for x in par_names]
+    #run_sens_test(immutable_pars, num_samples=100, mode="linear", dec_value=0.005, floor_frac=0.5, show_col=True)
