@@ -154,10 +154,7 @@ def run_sens_test(immutable_pars, run_name=None, num_samples=1000, mode="constan
         run_colonizations[i,:] = sim_output[1,:]
         sample_outputs.append(temp_pars)
 
-    if show_col:
-        sens_plotting(run_colonizations, show_col)
-    else:
-        sens_plotting(run_infections, show_col)
+    sens_plotting(run_colonizations, run_infections)
 
 def sens_mag_test(immutable_pars_cfg, mode="constant", dec_value=0.9, floor_frac=0.0):
     immutable_pars = [immutable_pars_cfg[x] for x in par_names]
@@ -211,18 +208,39 @@ def plot_sens_mag(sample_outputs, mode="mean", bar_labels=None):
     plt.tight_layout()
     plt.show()
 
-def sens_plotting(run_vals, show_col):
-    num_runs, num_years = run_vals.shape
-    median_run = np.median(run_vals, axis=0)
-    if show_col:
-        plt.title("ESBL-E colonizations")
-    else:
-        plt.title("ESBL-E infections")
-    plt.xlabel("Year")
-    plt.ylabel("Proportion of population")
+# def sens_plotting(run_vals, show_col):
+#     num_runs, num_years = run_vals.shape
+#     median_run = np.median(run_vals, axis=0)
+#     if show_col:
+#         plt.title("ESBL-E colonizations")
+#     else:
+#         plt.title("ESBL-E infections")
+#     plt.xlabel("Year")
+#     plt.ylabel("Proportion of population")
+#     for i in range(0, num_runs):
+#         plt.plot(range(0,num_years),run_vals[i,:],color="r",alpha=0.2)
+#     plt.plot(range(0,num_years),median_run,color="black",marker="*")
+#     plt.show()
+
+def sens_plotting(run_cols, run_infs):
+    _, axs = plt.subplots(1,2)
+    median_cols = np.median(run_cols, axis=0)
+    median_infs = np.median(run_infs, axis=0)
+    num_runs, num_years = run_cols.shape
+
     for i in range(0, num_runs):
-        plt.plot(range(0,num_years),run_vals[i,:],color="r",alpha=0.2)
-    plt.plot(range(0,num_years),median_run,color="black",marker="*")
+        axs[0].plot(range(0,num_years),run_cols[i,:],color="r",alpha=0.2)
+        axs[1].plot(range(0,num_years),run_infs[i,:],color="r",alpha=0.2)
+
+    axs[0].plot(range(0,num_years),median_cols,color="black",marker="*")
+    axs[0].set_title("ESBLE-E Colonization")
+    axs[0].set_ylabel("Proportion of population")
+    axs[0].set_xlabel("Year")
+
+    axs[1].plot(range(0,num_years),median_infs,color="black",marker="*")
+    axs[1].set_title("ESBLE-E Infections")
+    axs[1].set_xlabel("Year")
+
     plt.show()
 
 def plotting_fn(input_val=None, sub_folder=None, filename=None):
@@ -366,6 +384,6 @@ if __name__ == "__main__":
         cfg = yaml.safe_load(f)
     
     immutable_pars = [cfg[x] for x in par_names]
-    #run_sens_test(immutable_pars, num_samples=1000, mode="linear", dec_value=0.005, floor_frac=0.5, show_col=True)
-    sample_outs = sens_mag_test(cfg, mode="linear", dec_value=0.01, floor_frac=0.2)
-    plot_sens_mag(sample_outs, mode="final")
+    run_sens_test(immutable_pars, num_samples=1000, mode="linear", dec_value=0.005, floor_frac=0.5, show_col=True)
+    # sample_outs = sens_mag_test(cfg, mode="linear", dec_value=0.01, floor_frac=0.2)
+    # plot_sens_mag(sample_outs, mode="final")
