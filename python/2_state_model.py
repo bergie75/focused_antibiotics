@@ -272,7 +272,7 @@ if __name__ == "__main__":
     #y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="zero_out")
     #y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="exponential", dec_value=0.85)
     x,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="constant")
-    y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="linear", dec_value=0.005, floor_frac=0.5)
+    y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="linear", dec_value=0.005, floor_frac=0.2)
     compare_two(x,y)
 
     sens_par_file = os.path.join(os.getcwd(),"focused_antibiotics","parameters","2_state_sensitivity.yaml")
@@ -280,4 +280,4 @@ if __name__ == "__main__":
         cfg = yaml.safe_load(f)
     
     immutable_pars = [cfg[x] for x in par_names]
-    #run_sens_test(immutable_pars, num_samples=100, mode="linear", dec_value=0.005, floor_frac=0.5, show_col=True)
+    # run_sens_test(immutable_pars, num_samples=1000, mode="linear", dec_value=0.005, floor_frac=0.5, show_col=True)
