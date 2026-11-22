@@ -12,7 +12,7 @@ rng = np.random.default_rng()
 antibiotic_modes = ["constant", "exponential", "linear", "zero_out"]
 
 par_names = ["col_to_inf_risk", "norm_col_prob", "risk_factors", "dem_prob", "house_lmbda",
-            "house_trans", "food_acq", "animal_acq", "per_travel", "trips_lmbda",
+            "house_trans", "food_acq", "animal_acq", "travel_antibiotic_risk", "per_travel", "trips_lmbda",
             "per_hosp", "hosp_lmbda", "pr_pu_risk", "pr_pu_prob", "infection_probs",
             "start_anti_fracs", "start_col_dist", "num_years"]
 
@@ -25,6 +25,7 @@ full_names = {"col_to_inf_risk": "Risk ratio of developing infection while colon
             "food_acq": "Prob. of colonization by food",
             "animal_acq": "Prob. of colonization by animal contact",
             "per_travel": "Prob. of colonization per trip out of country",
+            "travel_antibiotic_risk": "Risk factor for traveling and using antibiotics",
             "trips_lmbda": "Parameter for exponential distribution for trips taken",
             "per_hosp": "Prob. of colonization per hospital trip",
             "hosp_lmbda": "Parameter for exponential distribution for hospital visits",
@@ -47,11 +48,13 @@ def poiss_mgf_simplify(s,lmbda):
 def matrix_t(y,antibiotic_probs, pars, print_mat=False):
     # load values from the config file
     # we will assume this is handed in as a vector and let something else do the config unpacking
-    _, norm_col_prob, risk_factors, dem_prob, house_lmbda, house_trans, food_acq, animal_acq, per_travel, trips_lmbda, per_hosp, hosp_lmbda, pr_pu_risk, pr_pu_prob = pars
+    _, norm_col_prob, risk_factors, dem_prob, house_lmbda, house_trans, food_acq, animal_acq, travel_antibiotic_risk, per_travel, trips_lmbda, per_hosp, hosp_lmbda, pr_pu_risk, pr_pu_prob = pars
 
     # calculated values to be used in the transition matrix
     antibiotic_prob = 1-np.prod(1-norm_col_prob*np.array(antibiotic_probs)*np.array(risk_factors))
-    travel_prob = 1-np.prod(np.array([poiss_mgf(np.log(1-per_travel[i]), trips_lmbda[i]) for i in range(0, len(per_travel))]))
+    anti_impact = 1-np.prod(1-np.array(antibiotic_probs)*np.array(risk_factors))
+    travel_anti_interaction = (1-anti_impact) + anti_impact*travel_antibiotic_risk
+    travel_prob = 1-np.prod(np.array([poiss_mgf(np.log(1-min(1,travel_anti_interaction*per_travel[i])), trips_lmbda[i]) for i in range(0, len(per_travel))]))
     house_acq = house_trans*(1-poiss_mgf(np.log(y[0]), house_lmbda))
     proton_pump_factor = (1-pr_pu_prob) + pr_pu_prob*pr_pu_risk
     stay_ND = ((1-antibiotic_prob)*(1-house_acq)*(1-animal_acq)*(1-food_acq)*(1-travel_prob)*poiss_mgf(np.log((1-per_hosp)),hosp_lmbda))/proton_pump_factor
@@ -65,9 +68,11 @@ def matrix_t(y,antibiotic_probs, pars, print_mat=False):
     return A_t
 
 def par_equilibrium(y0, antibiotic_probs, pars):
-    _, norm_col_prob, risk_factors, dem_prob, house_lmbda, house_trans, food_acq, animal_acq, per_travel, trips_lmbda, per_hosp, hosp_lmbda, pr_pu_risk, pr_pu_prob = pars
+    _, norm_col_prob, risk_factors, dem_prob, house_lmbda, house_trans, food_acq, animal_acq, travel_antibiotic_risk, per_travel, trips_lmbda, per_hosp, hosp_lmbda, pr_pu_risk, pr_pu_prob = pars
     antibiotic_prob = 1-np.prod(1-norm_col_prob*np.array(antibiotic_probs)*np.array(risk_factors))
-    travel_prob = 1-np.prod(np.array([poiss_mgf(np.log(1-per_travel[i]), trips_lmbda[i]) for i in range(0, len(per_travel))]))
+    anti_impact = 1-np.prod(1-np.array(antibiotic_probs)*np.array(risk_factors))
+    travel_anti_interaction = (1-anti_impact) + anti_impact*travel_antibiotic_risk
+    travel_prob = 1-np.prod(np.array([poiss_mgf(np.log(1-min(1,travel_anti_interaction*per_travel[i])), trips_lmbda[i]) for i in range(0, len(per_travel))]))
     proton_pump_factor = (1-pr_pu_prob) + pr_pu_prob*pr_pu_risk
     nd_pref = ((1-antibiotic_prob)*(1-animal_acq)*(1-food_acq)*(1-travel_prob)*poiss_mgf(np.log((1-per_hosp)),hosp_lmbda))/proton_pump_factor
     eqn_rhs = lambda y: y*(1+dem_prob-nd_pref*(1-house_trans+house_trans*np.exp(-house_lmbda*(1-y)))) - dem_prob
@@ -275,9 +280,9 @@ if __name__ == "__main__":
     y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="linear", dec_value=0.005, floor_frac=0.2)
     compare_two(x,y)
 
-    sens_par_file = os.path.join(os.getcwd(),"focused_antibiotics","parameters","2_state_sensitivity.yaml")
-    with open(sens_par_file, "r", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f)
+    # sens_par_file = os.path.join(os.getcwd(),"focused_antibiotics","parameters","2_state_sensitivity.yaml")
+    # with open(sens_par_file, "r", encoding="utf-8") as f:
+    #     cfg = yaml.safe_load(f)
     
-    immutable_pars = [cfg[x] for x in par_names]
+    # immutable_pars = [cfg[x] for x in par_names]
     # run_sens_test(immutable_pars, num_samples=1000, mode="linear", dec_value=0.005, floor_frac=0.5, show_col=True)
