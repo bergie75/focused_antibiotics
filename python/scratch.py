@@ -1,7 +1,8 @@
 import numpy as np
 from scipy.stats.qmc import LatinHypercube
+from copy import deepcopy
 
-def poiss_mgf(t, lmbda):
-    return np.exp(lmbda*(np.exp(t)-1))
+thing = [0,0.5,1]
+cfg = {"Hella": "0.1-0.3", "Sus": 0.2, "Nah": [0.1,"0.5-0.6"], "Yo": ["0.1-0.8", 3]}
 
-print(poiss_mgf(np.log(1-0.5), 0.116))
+print(list(np.array([1,2,3,4])))

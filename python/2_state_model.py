@@ -78,6 +78,35 @@ def par_equilibrium(y0, antibiotic_probs, pars):
     eqn_rhs = lambda y: y*(1+dem_prob-nd_pref*(1-house_trans+house_trans*np.exp(-house_lmbda*(1-y)))) - dem_prob
     return fsolve(eqn_rhs, y0)
 
+# LLM method, modified by me to include index information
+def get_range_info(cfg):
+    keys = []
+    lows = []
+    highs = []
+
+    def visit(value, key, app_idx=""):
+        if isinstance(value, list):
+            for idx,item in enumerate(value):
+                visit(item, key, app_idx=f"_{idx}")
+        elif isinstance(value, str):
+            parts = value.split("-")
+            if len(parts) != 2:
+                return
+
+            try:
+                low, high = map(float, parts)
+            except ValueError:
+                return
+
+            keys.append(f"{key}{app_idx}")
+            lows.append(low)
+            highs.append(high)
+
+    for key, value in cfg.items():
+        visit(value, key)
+
+    return keys, lows, highs
+
 def count_ranges(x):
     num_ranges = 0
     y=deepcopy(x)
@@ -129,6 +158,58 @@ def run_sens_test(immutable_pars, run_name=None, num_samples=1000, mode="constan
         sens_plotting(run_colonizations, show_col)
     else:
         sens_plotting(run_infections, show_col)
+
+def sens_mag_test(immutable_pars_cfg, mode="constant", dec_value=0.9, floor_frac=0.0):
+    immutable_pars = [immutable_pars_cfg[x] for x in par_names]
+    changed_vars, changed_lows, changed_highs = get_range_info(immutable_pars_cfg)
+    num_ranges = count_ranges(immutable_pars)  # how many ranges must be replaced by latin hypercube sampling
+    sample_outputs = {}
+
+    for k in range(0, num_ranges):
+        low_sample = list(np.ones(num_ranges)*0.5)  # all elements are set to the median value
+        high_sample = list(np.ones(num_ranges)*0.5)  # all elements are set to the median value
+        low_sample[k] = 0  # we check the low end of the range for the low sample
+        high_sample[k] = 1  # high end for the i=high
+        var_changed = changed_vars[k]
+
+        # low output
+        changed_low = changed_lows[k]
+        low_temp_pars = replace_ranges(immutable_pars, low_sample)
+        low_sim_output,_ = run_simulation(low_temp_pars, plot_results=False, mode=mode, dec_value=dec_value, floor_frac=floor_frac)
+        low_run_infections = low_sim_output[-1,:]
+        low_run_colonizations = low_sim_output[1,:]
+
+        # high output
+        changed_high = changed_highs[k]
+        high_temp_pars = replace_ranges(immutable_pars, high_sample)
+        high_sim_output,_ = run_simulation(high_temp_pars, plot_results=False, mode=mode, dec_value=dec_value, floor_frac=floor_frac)
+        high_run_infections = high_sim_output[-1,:]
+        high_run_colonizations = high_sim_output[1,:]
+
+        sample_outputs[var_changed] = [changed_low, changed_high, low_run_colonizations, high_run_colonizations, low_run_infections, high_run_infections]
+
+    return sample_outputs        
+
+def plot_sens_mag(sample_outputs, mode="mean", bar_labels=None):
+    bar_outputs = {}
+    for variable in sample_outputs.keys():
+        changed_low, changed_high, low_run_colonizations, high_run_colonizations, low_run_infections, high_run_infections = sample_outputs[variable]
+        infection_delta = np.abs(high_run_infections-low_run_infections)
+        if mode == "mean":
+            bar_outputs[variable] = np.mean(infection_delta)
+        elif mode == "final":
+            bar_outputs[variable] = infection_delta[-1]
+        elif isinstance(mode, np.ndarray):
+            bar_outputs[variable] = infection_delta*mode/np.sum(mode)
+
+    if bar_labels is None:
+        bar_labels = bar_outputs.keys()
+    
+    plt.bar(bar_labels, bar_outputs.values(), width=0.1)
+    plt.xticks(rotation=45, ha="right")  # optional: improves readability
+    plt.ylabel("Change in infections")
+    plt.tight_layout()
+    plt.show()
 
 def sens_plotting(run_vals, show_col):
     num_runs, num_years = run_vals.shape
@@ -276,13 +357,15 @@ if __name__ == "__main__":
     print(f"Estimated equilibrium: [{prop_eq[0]},{1-prop_eq[0]}]")
     #y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="zero_out")
     #y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="exponential", dec_value=0.85)
-    x,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="constant")
-    y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="linear", dec_value=0.005, floor_frac=0.2)
-    compare_two(x,y)
+    # x,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="constant")
+    # y,_ = run_simulation(pars,sub_folder="default", save_results=False, plot_results=False, mode="linear", dec_value=0.01, floor_frac=0.2)
+    # compare_two(x,y)
 
-    # sens_par_file = os.path.join(os.getcwd(),"focused_antibiotics","parameters","2_state_sensitivity.yaml")
-    # with open(sens_par_file, "r", encoding="utf-8") as f:
-    #     cfg = yaml.safe_load(f)
+    sens_par_file = os.path.join(os.getcwd(),"focused_antibiotics","parameters","2_state_sensitivity.yaml")
+    with open(sens_par_file, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
     
-    # immutable_pars = [cfg[x] for x in par_names]
-    # run_sens_test(immutable_pars, num_samples=1000, mode="linear", dec_value=0.005, floor_frac=0.5, show_col=True)
+    immutable_pars = [cfg[x] for x in par_names]
+    #run_sens_test(immutable_pars, num_samples=1000, mode="linear", dec_value=0.005, floor_frac=0.5, show_col=True)
+    sample_outs = sens_mag_test(cfg, mode="linear", dec_value=0.01, floor_frac=0.2)
+    plot_sens_mag(sample_outs, mode="final")
