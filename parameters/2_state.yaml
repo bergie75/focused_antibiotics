@@ -6,28 +6,40 @@ risk_factors:
 - 0.425
 - 0.15
 start_anti_fracs:
-- 0.09
-- 0.03
-- 0.12
-- 0.03
-- 0.03
+- 0.09 # floroquinolones
+- 0.03 # ceftriaxone/cefotaxime
+- 0.15 # penicillin
+- 0.015 # fosfomycin
+- 0.015 # nitrofurantoin
 dem_prob: 0.65
 start_col_dist:
-- 0.81
-- 0.19
+- 0.77
+- 0.23
 infection_probs:
 - 0.0012
 - 0.065
 
 per_travel:
-- 0.1
-- 0.25
-- 0.35
+- 0.15  # Mexico
+- 0.3  # C/S America
+- 0.45  # SE Asia
+- 0.67  # S Asia
+- 0.05 # UK
+- 0.075 # Spain
+- 0.175 # Italy, Greece, Romania
+- 0.01  # Canada
+- 0.03 # Japan, S Korea
 
 trips_lmbda:
-- 0.084
-- 0.117
-- 0.116
+- 0.117 # Mexico
+- 0.025 # C/S America
+- 0.041  # SE Asia
+- 0.041 # S Asia
+- 0.018 # UK
+- 0.009 # Spain
+- 0.009 # Italy, Greece, Romania
+- 0.041 # Canada
+- 0.0 # Japan, S Korea
 
 col_to_inf_risk: 2.0
 pr_pu_risk: 1.48

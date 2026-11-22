@@ -26,13 +26,13 @@ per_travel:
 trips_lmbda:
 - 0.084
 - 0.117
-- 0.0-0.116
+- 0.0
 
 col_to_inf_risk: 2.0
 pr_pu_risk: 1.48
 pr_pu_prob: 0.086
 house_lmbda: 1.54
-house_trans: 0.1
+house_trans: 0.1-0.3
 food_acq: 0.01
 animal_acq: 0.01
 per_hosp: 0.03
